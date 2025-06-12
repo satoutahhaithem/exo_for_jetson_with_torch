@@ -69,7 +69,6 @@ CHIP_FLOPS = {
   ### NVIDIA GPUs
   # RTX 40 series
   "NVIDIA GEFORCE RTX 4090": DeviceFlops(fp32=82.58*TFLOPS, fp16=165.16*TFLOPS, int8=330.32*TFLOPS),
-  "NVIDIA GEFORCE RTX 4090 D": DeviceFlops(fp32=82.58*TFLOPS, fp16=165.16*TFLOPS, int8=330.32*TFLOPS),
   "NVIDIA GEFORCE RTX 4080": DeviceFlops(fp32=48.74*TFLOPS, fp16=97.48*TFLOPS, int8=194.96*TFLOPS),
   "NVIDIA GEFORCE RTX 4080 SUPER": DeviceFlops(fp32=52.0*TFLOPS, fp16=104.0*TFLOPS, int8=208.0*TFLOPS),
   "NVIDIA GEFORCE RTX 4070 TI SUPER": DeviceFlops(fp32=40.0*TFLOPS, fp16=80.0*TFLOPS, int8=160.0*TFLOPS),
@@ -121,10 +120,6 @@ CHIP_FLOPS = {
   "NVIDIA A800 80GB PCIE": DeviceFlops(fp32=19.5*TFLOPS, fp16=312.0*TFLOPS, int8=624.0*TFLOPS),
   "NVIDIA A100 80GB SXM": DeviceFlops(fp32=19.5*TFLOPS, fp16=312.0*TFLOPS, int8=624.0*TFLOPS),
   "NVIDIA A800 80GB SXM": DeviceFlops(fp32=19.5*TFLOPS, fp16=312.0*TFLOPS, int8=624.0*TFLOPS),
-  "NVIDIA T1000 8GB": DeviceFlops(fp32=2.5 * TFLOPS, fp16=5.0 * TFLOPS, int8=10.0 * TFLOPS),
-  "Quadro M2000": DeviceFlops(fp32=0.5 * TFLOPS, fp16=1.0 * TFLOPS, int8=2.0 * TFLOPS),
-  "Quadro P400": DeviceFlops(fp32=0.641 * TFLOPS, fp16=1.282 * TFLOPS, int8=2.564 * TFLOPS),
-  "NVIDIA A10": DeviceFlops(fp32=31.2 * TFLOPS, fp16=62.5 * TFLOPS, int8=2.5 * TFLOPS),
   # ... add more devices if needed ...
   ### AMD GPUs
   # RX 6000 series
@@ -145,6 +140,7 @@ CHIP_FLOPS = {
   "AMD Radeon RX 7600": DeviceFlops(fp32=21.5*TFLOPS, fp16=43.0*TFLOPS, int8=86.0*TFLOPS),
   "AMD Radeon RX 7500": DeviceFlops(fp32=16.2*TFLOPS, fp16=32.4*TFLOPS, int8=64.8*TFLOPS),
   ### Qualcomm embedded chips: TODO
+  "JETSON AGX ORIN 32GB": DeviceFlops(fp32=17.65*TFLOPS, fp16=35.3*TFLOPS, int8=70.6*TFLOPS),
 }
 CHIP_FLOPS.update({f"LAPTOP GPU {key}": value for key, value in CHIP_FLOPS.items()})
 CHIP_FLOPS.update({f"Laptop GPU {key}": value for key, value in CHIP_FLOPS.items()})
@@ -178,31 +174,45 @@ async def mac_device_capabilities() -> DeviceCapabilities:
     flops=CHIP_FLOPS.get(chip_id, DeviceFlops(fp32=0, fp16=0, int8=0))
   )
 
-
 async def linux_device_capabilities() -> DeviceCapabilities:
   import psutil
   from tinygrad import Device
 
-  if DEBUG >= 2: print(f"tinygrad {Device.DEFAULT=}")
+  if DEBUG >= 2:
+    print(f"tinygrad {Device.DEFAULT=}")
+
   if Device.DEFAULT == "CUDA" or Device.DEFAULT == "NV" or Device.DEFAULT == "GPU":
     import pynvml
 
     pynvml.nvmlInit()
     handle = pynvml.nvmlDeviceGetHandleByIndex(0)
     gpu_raw_name = pynvml.nvmlDeviceGetName(handle).upper()
-    gpu_name = gpu_raw_name.rsplit(" ", 1)[0] if gpu_raw_name.endswith("GB") else gpu_raw_name
-    gpu_memory_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
 
-    if DEBUG >= 2: print(f"NVIDIA device {gpu_name=} {gpu_memory_info=}")
+    # For Jetson AGX Orin 32GB, override the GPU name
+    if "ORIN" in gpu_raw_name:
+      gpu_name = "JETSON AGX ORIN 32GB"
+    else:
+      gpu_name = gpu_raw_name.rsplit(" ", 1)[0] if gpu_raw_name.endswith("GB") else gpu_raw_name
+
+    try:
+      gpu_memory_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+      memory_mb = gpu_memory_info.total // 2**20
+    except pynvml.NVMLError_NotSupported:
+      print("[Warning] pynvml: GPU memory info not supported on this device.")
+      memory_mb = psutil.virtual_memory().total // 2**20
+
+    if DEBUG >= 2:
+      print(f"NVIDIA device {gpu_name=} {memory_mb=}")
 
     pynvml.nvmlShutdown()
 
     return DeviceCapabilities(
       model=f"Linux Box ({gpu_name})",
       chip=gpu_name,
-      memory=gpu_memory_info.total // 2**20,
+      memory=memory_mb,
       flops=CHIP_FLOPS.get(gpu_name, DeviceFlops(fp32=0, fp16=0, int8=0)),
     )
+
   elif Device.DEFAULT == "AMD":
     import pyamdgpuinfo
 
@@ -210,7 +220,8 @@ async def linux_device_capabilities() -> DeviceCapabilities:
     gpu_name = gpu_raw_info.name
     gpu_memory_info = gpu_raw_info.memory_info["vram_size"]
 
-    if DEBUG >= 2: print(f"AMD device {gpu_name=} {gpu_memory_info=}")
+    if DEBUG >= 2:
+      print(f"AMD device {gpu_name=} {gpu_memory_info=}")
 
     return DeviceCapabilities(
       model="Linux Box (" + gpu_name + ")",
@@ -228,7 +239,8 @@ async def linux_device_capabilities() -> DeviceCapabilities:
     )
 
 
-async def windows_device_capabilities() -> DeviceCapabilities:
+
+def windows_device_capabilities() -> DeviceCapabilities:
   import psutil
 
   def get_gpu_info():
