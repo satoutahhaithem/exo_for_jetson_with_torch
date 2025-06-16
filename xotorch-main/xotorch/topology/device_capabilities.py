@@ -202,10 +202,15 @@ async def linux_device_capabilities() -> DeviceCapabilities:
     else:
       gpu_name = gpu_raw_name.rsplit(" ", 1)[0] if gpu_raw_name.endswith("GB") else gpu_raw_name
     
+    # Print all keys in CHIP_FLOPS for debugging
+    print(f"Available CHIP_FLOPS keys: {list(CHIP_FLOPS.keys())}")
+    
     # Special handling for Jetson devices
     if gpu_raw_name == 'ORIN (NVGPU)' or "ORIN" in gpu_raw_name:
+      print(f"Detected Jetson device: {gpu_raw_name}")
       gpu_memory_info = get_jetson_device_meminfo()
       memory_mb = gpu_memory_info.total // 1000 // 1000  # Convert to MB
+      print(f"Jetson memory info: {memory_mb} MB")
     else:
       try:
         gpu_memory_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
@@ -214,13 +219,21 @@ async def linux_device_capabilities() -> DeviceCapabilities:
         print("[Warning] pynvml: GPU memory info not supported on this device.")
         memory_mb = psutil.virtual_memory().total // 2**20
 
-    if DEBUG >= 2: print(f"NVIDIA device {gpu_name=} {gpu_memory_info=}")
+    # Always print device info for debugging
+    print(f"NVIDIA device {gpu_name=} {memory_mb=}")
     
     # Get FLOPS values and print for debugging
     flops = CHIP_FLOPS.get(gpu_name, DeviceFlops(fp32=0, fp16=0, int8=0))
-    if DEBUG >= 1 or "ORIN" in gpu_raw_name:
-      print(f"FLOPS for {gpu_name}: {flops}")
-      print(f"Available CHIP_FLOPS keys: {[k for k in CHIP_FLOPS.keys() if 'JETSON' in k]}")
+    print(f"FLOPS for {gpu_name}: {flops}")
+    
+    # Check if the key exists in CHIP_FLOPS
+    if gpu_name in CHIP_FLOPS:
+      print(f"Found {gpu_name} in CHIP_FLOPS")
+    else:
+      print(f"WARNING: {gpu_name} not found in CHIP_FLOPS")
+      # Try to find similar keys
+      similar_keys = [k for k in CHIP_FLOPS.keys() if "ORIN" in k or "JETSON" in k]
+      print(f"Similar keys in CHIP_FLOPS: {similar_keys}")
 
     pynvml.nvmlShutdown()
 
