@@ -6,7 +6,7 @@ from xotorch.helpers import xotorch_text, pretty_print_bytes, pretty_print_bytes
 from xotorch.topology.topology import Topology
 from xotorch.topology.partitioning_strategy import Partition
 from xotorch.download.download_progress import RepoProgressEvent
-from xotorch.topology.device_capabilities import UNKNOWN_DEVICE_CAPABILITIES
+from xotorch.topology.device_capabilities import UNKNOWN_DEVICE_CAPABILITIES, TFLOPS
 
 # Use the same debug log file as in device_capabilities.py
 DEBUG_LOG_FILE = os.path.expanduser("~/xotorch_debug.log")
@@ -312,7 +312,7 @@ class TopologyViz:
       # Place node info (model, memory, TFLOPS, partition) on three lines
       node_info = [
         f"{device_capabilities.model} {device_capabilities.memory // 1024}GB",
-        f"{device_capabilities.flops.fp16}TFLOPS",
+        f"{device_capabilities.flops.fp16 / TFLOPS:.2f} TFLOPS",
         f"[{partition.start:.2f}-{partition.end:.2f}]",
       ]
 
