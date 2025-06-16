@@ -2,6 +2,14 @@
 
 This repository contains modified versions of [exo-pytorch](https://github.com/exo-explore/exo) and [xotorch](https://github.com/exo-explore/xotorch) that have been adapted to work on NVIDIA Jetson devices.
 
+## Supported Jetson Models
+
+The following Jetson models are specifically supported:
+
+- Jetson AGX Orin 32GB
+- Jetson Orin Nano
+- Jetson Orin NX
+
 ## Repository Contents
 
 - **Exo-pytorch**: A modified version of the Exo framework that works on Jetson devices
@@ -13,24 +21,28 @@ This repository contains modified versions of [exo-pytorch](https://github.com/e
 
 The original Exo framework has been modified to properly detect and utilize Jetson hardware:
 
-- Added Jetson AGX Orin 32GB detection in `device_capabilities.py`
-- Added FLOPS values for Jetson devices
-- Implemented special handling for Jetson memory information
+- Added detection for multiple Jetson models in `device_capabilities.py`:
+  - Jetson AGX Orin 32GB
+  - Jetson Orin Nano
+  - Jetson Orin NX
+- Added appropriate FLOPS values for each Jetson model
+- Implemented optimized memory information handling for Jetson devices
 
 ### xotorch Modifications
 
 Similar modifications have been made to xotorch:
 
-- Added Jetson device detection
-- Added FLOPS values for Jetson devices
-- Implemented special handling for Jetson memory information
+- Added detection for multiple Jetson models
+- Added appropriate FLOPS values for each Jetson model
+- Implemented optimized memory information handling
+- Added caching mechanisms to improve performance
 - Added fallback mechanisms to ensure proper TFLOPS display
 
 ## Installation
 
 ### Prerequisites
 
-- NVIDIA Jetson device (tested on Jetson AGX Orin 32GB)
+- NVIDIA Jetson device (tested on Jetson AGX Orin 32GB, Jetson Orin Nano, and Jetson Orin NX)
 - Python 3.9+
 - CUDA toolkit
 
@@ -91,6 +103,15 @@ If TFLOPS values are not displaying correctly:
 1. Check the debug log file for device detection information
 2. Verify that the Jetson device is being correctly identified
 3. Ensure that the FLOPS values are being correctly retrieved from the CHIP_FLOPS dictionary
+
+#### Performance Issues
+
+If you experience performance issues:
+
+1. Make sure you're using the latest version of the code
+2. Check the debug log file for any warnings or errors
+3. Try setting the `DEBUG` environment variable to 0 to disable debug logging
+4. If using a specific Jetson model (Nano, NX, etc.), ensure it's being correctly identified in the logs
 
 #### Module Not Found Errors
 

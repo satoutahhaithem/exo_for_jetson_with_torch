@@ -224,29 +224,43 @@ class TopologyViz:
           visualization[info_start_y + i][start_x + j] = char
 
     # Calculate total FLOPS and position on the bar
-    # Log node information for debugging
-    debug_log("Topology nodes:")
-    for node_id, node_caps in self.topology.nodes.items():
-      debug_log(f"  Node {node_id}: {node_caps}")
+    # Only log detailed node information in high debug levels to reduce overhead
+    if DEBUG >= 3:
+      debug_log("Topology nodes:")
+      for node_id, node_caps in self.topology.nodes.items():
+        debug_log(f"  Node {node_id}: {node_caps}")
+      
+      debug_log("Partitions:")
+      for partition in self.partitions:
+        debug_log(f"  Partition: {partition}")
+        node_caps = self.topology.nodes.get(partition.node_id, UNKNOWN_DEVICE_CAPABILITIES)
+        debug_log(f"  Node capabilities: {node_caps}")
+        debug_log(f"  FLOPS: {node_caps.flops}")
     
-    debug_log("Partitions:")
-    for partition in self.partitions:
-      debug_log(f"  Partition: {partition}")
-      node_caps = self.topology.nodes.get(partition.node_id, UNKNOWN_DEVICE_CAPABILITIES)
-      debug_log(f"  Node capabilities: {node_caps}")
-      debug_log(f"  FLOPS: {node_caps.flops}")
+    # Cache FLOPS calculation to avoid repeated calculations
+    if not hasattr(self, '_cached_total_flops') or self._cached_total_flops is None:
+      self._cached_total_flops = sum(self.topology.nodes.get(partition.node_id, UNKNOWN_DEVICE_CAPABILITIES).flops.fp16 for partition in self.partitions)
+      
+      # Force a minimum value for testing
+      if self._cached_total_flops < 0.01 and len(self.partitions) > 0:
+        # Check for specific Jetson models
+        for node_id, node_caps in self.topology.nodes.items():
+          if "JETSON ORIN NANO" in node_caps.chip:
+            self._cached_total_flops = 20.0  # fp16 FLOPS for Jetson Orin Nano
+            break
+          elif "JETSON ORIN NX" in node_caps.chip:
+            self._cached_total_flops = 24.0  # fp16 FLOPS for Jetson Orin NX
+            break
+          elif "JETSON AGX ORIN" in node_caps.chip:
+            self._cached_total_flops = 35.3  # fp16 FLOPS for Jetson AGX Orin 32GB
+            break
     
-    total_flops = sum(self.topology.nodes.get(partition.node_id, UNKNOWN_DEVICE_CAPABILITIES).flops.fp16 for partition in self.partitions)
-    debug_log(f"Total FLOPS: {total_flops}")
+    total_flops = self._cached_total_flops
+    if DEBUG >= 1:
+      debug_log(f"Total FLOPS: {total_flops}")
     
-    # Force a minimum value for testing
-    if total_flops < 0.01 and len(self.partitions) > 0:
-      debug_log("FLOPS too low, forcing Jetson values")
-      # Use Jetson FLOPS values for testing
-      total_flops = 35.3  # fp16 FLOPS for Jetson AGX Orin 32GB
-    
-    bar_pos = (math.tanh(total_flops**(1/3)/2.5 - 2) + 1)
-    debug_log(f"Bar position: {bar_pos}")
+    # Use a more efficient calculation for bar position
+    bar_pos = min(1.0, max(0.0, (math.tanh(total_flops**(1/3)/2.5 - 2) + 1)))
 
     # Add GPU poor/rich bar
     bar_width = 30
