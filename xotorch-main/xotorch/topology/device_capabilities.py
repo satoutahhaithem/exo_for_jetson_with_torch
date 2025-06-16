@@ -5,15 +5,7 @@ import subprocess
 import psutil
 import asyncio
 import torch
-import os
 from xotorch.helpers import get_mac_system_info, subprocess_pool
-
-# Create a debug log file
-DEBUG_LOG_FILE = os.path.expanduser("~/xotorch_debug.log")
-def debug_log(message):
-    """Write debug message to log file"""
-    with open(DEBUG_LOG_FILE, "a") as f:
-        f.write(f"{message}\n")
 
 TFLOPS = 1.00
 
@@ -155,8 +147,6 @@ CHIP_FLOPS = {
   "AMD Radeon RX 7500": DeviceFlops(fp32=16.2*TFLOPS, fp16=32.4*TFLOPS, int8=64.8*TFLOPS),
   ### Qualcomm embedded chips: TODO
   "JETSON AGX ORIN 32GB": DeviceFlops(fp32=17.65*TFLOPS, fp16=35.3*TFLOPS, int8=70.6*TFLOPS),
-  "JETSON ORIN NANO": DeviceFlops(fp32=10.0*TFLOPS, fp16=20.0*TFLOPS, int8=40.0*TFLOPS),
-  "JETSON ORIN NX": DeviceFlops(fp32=12.0*TFLOPS, fp16=24.0*TFLOPS, int8=48.0*TFLOPS),
 }
 CHIP_FLOPS.update({f"LAPTOP GPU {key}": value for key, value in CHIP_FLOPS.items()})
 CHIP_FLOPS.update({f"Laptop GPU {key}": value for key, value in CHIP_FLOPS.items()})
@@ -208,76 +198,25 @@ async def linux_device_capabilities() -> DeviceCapabilities:
     # For Jetson AGX Orin 32GB, override the GPU name
     if "ORIN" in gpu_raw_name:
       gpu_name = "JETSON AGX ORIN 32GB"
-      if DEBUG >= 1: print(f"Detected Jetson device: {gpu_raw_name} -> {gpu_name}")
     else:
       gpu_name = gpu_raw_name.rsplit(" ", 1)[0] if gpu_raw_name.endswith("GB") else gpu_raw_name
     
-    # Log all keys in CHIP_FLOPS for debugging
-    debug_log(f"Available CHIP_FLOPS keys: {list(CHIP_FLOPS.keys())}")
-    
-    # Special handling for Jetson devices
-    if gpu_raw_name == 'ORIN (NVGPU)' or "ORIN" in gpu_raw_name:
-      debug_log(f"Detected Jetson device: {gpu_raw_name}")
-      
-      # More specific Jetson model detection
-      if "NANO" in gpu_raw_name:
-        gpu_name = "JETSON ORIN NANO"
-      elif "NX" in gpu_raw_name:
-        gpu_name = "JETSON ORIN NX"
-      else:
-        gpu_name = "JETSON AGX ORIN 32GB"
-        
-      debug_log(f"Mapped to Jetson model: {gpu_name}")
-      
-      gpu_memory_info = get_jetson_device_meminfo()
-      memory_mb = gpu_memory_info.total // 1000 // 1000  # Convert to MB
-      debug_log(f"Jetson memory info: {memory_mb} MB")
-    else:
-      try:
-        gpu_memory_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
-        memory_mb = gpu_memory_info.total // 2**20
-      except pynvml.NVMLError_NotSupported:
-        debug_log("[Warning] pynvml: GPU memory info not supported on this device.")
-        memory_mb = psutil.virtual_memory().total // 2**20
+    try:
+      gpu_memory_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+      memory_mb = gpu_memory_info.total // 2**20
+    except pynvml.NVMLError_NotSupported:
+      print("[Warning] pynvml: GPU memory info not supported on this device.")
+      memory_mb = psutil.virtual_memory().total // 2**20
 
-    # Always log device info for debugging
-    debug_log(f"NVIDIA device {gpu_name=} {memory_mb=}")
-    
-    # Get FLOPS values and log for debugging
-    flops = CHIP_FLOPS.get(gpu_name, DeviceFlops(fp32=0, fp16=0, int8=0))
-    debug_log(f"FLOPS for {gpu_name}: {flops}")
-    
-    # Check if the key exists in CHIP_FLOPS
-    if gpu_name in CHIP_FLOPS:
-      debug_log(f"Found {gpu_name} in CHIP_FLOPS")
-    else:
-      debug_log(f"WARNING: {gpu_name} not found in CHIP_FLOPS")
-      # Try to find similar keys
-      similar_keys = [k for k in CHIP_FLOPS.keys() if "ORIN" in k or "JETSON" in k]
-      debug_log(f"Similar keys in CHIP_FLOPS: {similar_keys}")
-      
-      # Try a direct assignment for Jetson with more specific model detection
-      if "ORIN" in gpu_raw_name:
-        if "NANO" in gpu_raw_name:
-          debug_log("Forcing JETSON ORIN NANO FLOPS values")
-          flops = CHIP_FLOPS["JETSON ORIN NANO"]
-        elif "NX" in gpu_raw_name:
-          debug_log("Forcing JETSON ORIN NX FLOPS values")
-          flops = CHIP_FLOPS["JETSON ORIN NX"]
-        else:
-          debug_log("Forcing JETSON AGX ORIN 32GB FLOPS values")
-          flops = CHIP_FLOPS["JETSON AGX ORIN 32GB"]
+    if DEBUG >= 2: print(f"NVIDIA device {gpu_name=} {gpu_memory_info=}")
 
     pynvml.nvmlShutdown()
 
-    # Log the final values being returned
-    debug_log(f"Returning DeviceCapabilities with model={gpu_name}, memory={memory_mb}, flops={flops}")
-    
     return DeviceCapabilities(
       model=f"Linux Box ({gpu_name})",
       chip=gpu_name,
       memory=memory_mb,
-      flops=flops,
+      flops=CHIP_FLOPS.get(gpu_name, DeviceFlops(fp32=0, fp16=0, int8=0)),
     )
   # Check for AMD GPUs
   try:
@@ -306,63 +245,6 @@ async def linux_device_capabilities() -> DeviceCapabilities:
     memory=psutil.virtual_memory().total // 2**20,
     flops=DeviceFlops(fp32=0, fp16=0, int8=0),
   )
-
-def get_jetson_device_meminfo():
-  """Get memory information for Jetson devices."""
-  from re import search
-  from pynvml import c_nvmlMemory_t
-
-  # Cache for memory info to avoid repeated file reads
-  if hasattr(get_jetson_device_meminfo, 'cached_result') and get_jetson_device_meminfo.cached_result:
-    return get_jetson_device_meminfo.cached_result
-
-  def extract_numeric_value(text):
-    """Extract the first numeric value from a string."""
-    match = search(r'\d+', text)
-    return int(match.group()) if match else 0
-
-  try:
-    # Try to use nvidia-smi first for better performance
-    import subprocess
-    result = subprocess.run(['nvidia-smi', '--query-gpu=memory.total,memory.free', '--format=csv,noheader,nounits'],
-                           capture_output=True, text=True, check=True)
-    if result.returncode == 0:
-      parts = result.stdout.strip().split(',')
-      if len(parts) >= 2:
-        total_memory = int(parts[0].strip()) * 1024  # Convert from MB to KB
-        free_memory = int(parts[1].strip()) * 1024   # Convert from MB to KB
-        used_memory = total_memory - free_memory
-        
-        memory_info = c_nvmlMemory_t(
-          total=total_memory * 1000,
-          free=free_memory * 1000,
-          used=used_memory * 1000
-        )
-        get_jetson_device_meminfo.cached_result = memory_info
-        return memory_info
-  except (subprocess.SubprocessError, ValueError, IndexError):
-    # Fall back to reading /proc/meminfo
-    pass
-    
-  # Read total and free memory from /proc/meminfo
-  with open("/proc/meminfo") as fp:
-    total_memory = extract_numeric_value(fp.readline())
-    free_memory = extract_numeric_value(fp.readline())
-
-  # Calculate used memory
-  used_memory = total_memory - free_memory
-
-  # Create memory info object
-  memory_info = c_nvmlMemory_t(
-    total=total_memory * 1000,
-    free=free_memory * 1000,
-    used=used_memory * 1000
-  )
-  
-  # Cache the result
-  get_jetson_device_meminfo.cached_result = memory_info
-  
-  return memory_info
 
 
 async def windows_device_capabilities() -> DeviceCapabilities:
