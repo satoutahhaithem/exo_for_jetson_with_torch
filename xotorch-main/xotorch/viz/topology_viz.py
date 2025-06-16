@@ -312,7 +312,7 @@ class TopologyViz:
       # Place node info (model, memory, TFLOPS, partition) on three lines
       node_info = [
         f"{device_capabilities.model} {device_capabilities.memory // 1024}GB",
-        f"{device_capabilities.flops.fp16 / TFLOPS:.2f} TFLOPS",
+        f"{device_capabilities.flops.fp16}TFLOPS",
         f"[{partition.start:.2f}-{partition.end:.2f}]",
       ]
 

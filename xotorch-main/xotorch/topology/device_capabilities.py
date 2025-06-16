@@ -145,7 +145,9 @@ CHIP_FLOPS = {
   "AMD Radeon RX 7700 XT": DeviceFlops(fp32=34.2*TFLOPS, fp16=68.4*TFLOPS, int8=136.8*TFLOPS),
   "AMD Radeon RX 7600": DeviceFlops(fp32=21.5*TFLOPS, fp16=43.0*TFLOPS, int8=86.0*TFLOPS),
   "AMD Radeon RX 7500": DeviceFlops(fp32=16.2*TFLOPS, fp16=32.4*TFLOPS, int8=64.8*TFLOPS),
-  ### Qualcomm embedded chips: TODO
+  ### NVIDIA Jetson devices
+  "JETSON ORIN NANO": DeviceFlops(fp32=10.0*TFLOPS, fp16=20.0*TFLOPS, int8=40.0*TFLOPS),
+  "JETSON ORIN NX": DeviceFlops(fp32=12.0*TFLOPS, fp16=24.0*TFLOPS, int8=48.0*TFLOPS),
   "JETSON AGX ORIN 32GB": DeviceFlops(fp32=17.65*TFLOPS, fp16=35.3*TFLOPS, int8=70.6*TFLOPS),
 }
 CHIP_FLOPS.update({f"LAPTOP GPU {key}": value for key, value in CHIP_FLOPS.items()})
@@ -195,9 +197,14 @@ async def linux_device_capabilities() -> DeviceCapabilities:
     handle = pynvml.nvmlDeviceGetHandleByIndex(0)
     gpu_raw_name = pynvml.nvmlDeviceGetName(handle).upper()
     
-    # For Jetson AGX Orin 32GB, override the GPU name
+    # For Jetson Orin devices, detect specific models
     if "ORIN" in gpu_raw_name:
-      gpu_name = "JETSON AGX ORIN 32GB"
+      if "NANO" in gpu_raw_name:
+        gpu_name = "JETSON ORIN NANO"
+      elif "NX" in gpu_raw_name:
+        gpu_name = "JETSON ORIN NX"
+      else:
+        gpu_name = "JETSON AGX ORIN 32GB"
     else:
       gpu_name = gpu_raw_name.rsplit(" ", 1)[0] if gpu_raw_name.endswith("GB") else gpu_raw_name
     
