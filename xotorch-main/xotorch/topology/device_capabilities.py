@@ -198,17 +198,29 @@ async def linux_device_capabilities() -> DeviceCapabilities:
     # For Jetson AGX Orin 32GB, override the GPU name
     if "ORIN" in gpu_raw_name:
       gpu_name = "JETSON AGX ORIN 32GB"
+      if DEBUG >= 1: print(f"Detected Jetson device: {gpu_raw_name} -> {gpu_name}")
     else:
       gpu_name = gpu_raw_name.rsplit(" ", 1)[0] if gpu_raw_name.endswith("GB") else gpu_raw_name
     
-    try:
-      gpu_memory_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
-      memory_mb = gpu_memory_info.total // 2**20
-    except pynvml.NVMLError_NotSupported:
-      print("[Warning] pynvml: GPU memory info not supported on this device.")
-      memory_mb = psutil.virtual_memory().total // 2**20
+    # Special handling for Jetson devices
+    if gpu_raw_name == 'ORIN (NVGPU)' or "ORIN" in gpu_raw_name:
+      gpu_memory_info = get_jetson_device_meminfo()
+      memory_mb = gpu_memory_info.total // 1000 // 1000  # Convert to MB
+    else:
+      try:
+        gpu_memory_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+        memory_mb = gpu_memory_info.total // 2**20
+      except pynvml.NVMLError_NotSupported:
+        print("[Warning] pynvml: GPU memory info not supported on this device.")
+        memory_mb = psutil.virtual_memory().total // 2**20
 
     if DEBUG >= 2: print(f"NVIDIA device {gpu_name=} {gpu_memory_info=}")
+    
+    # Get FLOPS values and print for debugging
+    flops = CHIP_FLOPS.get(gpu_name, DeviceFlops(fp32=0, fp16=0, int8=0))
+    if DEBUG >= 1 or "ORIN" in gpu_raw_name:
+      print(f"FLOPS for {gpu_name}: {flops}")
+      print(f"Available CHIP_FLOPS keys: {[k for k in CHIP_FLOPS.keys() if 'JETSON' in k]}")
 
     pynvml.nvmlShutdown()
 
@@ -216,7 +228,7 @@ async def linux_device_capabilities() -> DeviceCapabilities:
       model=f"Linux Box ({gpu_name})",
       chip=gpu_name,
       memory=memory_mb,
-      flops=CHIP_FLOPS.get(gpu_name, DeviceFlops(fp32=0, fp16=0, int8=0)),
+      flops=flops,
     )
   # Check for AMD GPUs
   try:
@@ -244,6 +256,31 @@ async def linux_device_capabilities() -> DeviceCapabilities:
     chip=f"Unknown Chip",
     memory=psutil.virtual_memory().total // 2**20,
     flops=DeviceFlops(fp32=0, fp16=0, int8=0),
+  )
+
+def get_jetson_device_meminfo():
+  """Get memory information for Jetson devices."""
+  from re import search
+  from pynvml import c_nvmlMemory_t
+
+  def extract_numeric_value(text):
+    """Extract the first numeric value from a string."""
+    match = search(r'\d+', text)
+    return int(match.group()) if match else 0
+
+  # Read total and free memory from /proc/meminfo
+  with open("/proc/meminfo") as fp:
+    total_memory = extract_numeric_value(fp.readline())
+    free_memory = extract_numeric_value(fp.readline())
+
+  # Calculate used memory
+  used_memory = total_memory - free_memory
+
+  # Return memory info object
+  return c_nvmlMemory_t(
+    total=total_memory * 1000,
+    free=free_memory * 1000,
+    used=used_memory * 1000
   )
 
 
