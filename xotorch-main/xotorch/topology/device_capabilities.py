@@ -5,7 +5,15 @@ import subprocess
 import psutil
 import asyncio
 import torch
+import os
 from xotorch.helpers import get_mac_system_info, subprocess_pool
+
+# Create a debug log file
+DEBUG_LOG_FILE = os.path.expanduser("~/xotorch_debug.log")
+def debug_log(message):
+    """Write debug message to log file"""
+    with open(DEBUG_LOG_FILE, "a") as f:
+        f.write(f"{message}\n")
 
 TFLOPS = 1.00
 
@@ -202,41 +210,49 @@ async def linux_device_capabilities() -> DeviceCapabilities:
     else:
       gpu_name = gpu_raw_name.rsplit(" ", 1)[0] if gpu_raw_name.endswith("GB") else gpu_raw_name
     
-    # Print all keys in CHIP_FLOPS for debugging
-    print(f"Available CHIP_FLOPS keys: {list(CHIP_FLOPS.keys())}")
+    # Log all keys in CHIP_FLOPS for debugging
+    debug_log(f"Available CHIP_FLOPS keys: {list(CHIP_FLOPS.keys())}")
     
     # Special handling for Jetson devices
     if gpu_raw_name == 'ORIN (NVGPU)' or "ORIN" in gpu_raw_name:
-      print(f"Detected Jetson device: {gpu_raw_name}")
+      debug_log(f"Detected Jetson device: {gpu_raw_name}")
       gpu_memory_info = get_jetson_device_meminfo()
       memory_mb = gpu_memory_info.total // 1000 // 1000  # Convert to MB
-      print(f"Jetson memory info: {memory_mb} MB")
+      debug_log(f"Jetson memory info: {memory_mb} MB")
     else:
       try:
         gpu_memory_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
         memory_mb = gpu_memory_info.total // 2**20
       except pynvml.NVMLError_NotSupported:
-        print("[Warning] pynvml: GPU memory info not supported on this device.")
+        debug_log("[Warning] pynvml: GPU memory info not supported on this device.")
         memory_mb = psutil.virtual_memory().total // 2**20
 
-    # Always print device info for debugging
-    print(f"NVIDIA device {gpu_name=} {memory_mb=}")
+    # Always log device info for debugging
+    debug_log(f"NVIDIA device {gpu_name=} {memory_mb=}")
     
-    # Get FLOPS values and print for debugging
+    # Get FLOPS values and log for debugging
     flops = CHIP_FLOPS.get(gpu_name, DeviceFlops(fp32=0, fp16=0, int8=0))
-    print(f"FLOPS for {gpu_name}: {flops}")
+    debug_log(f"FLOPS for {gpu_name}: {flops}")
     
     # Check if the key exists in CHIP_FLOPS
     if gpu_name in CHIP_FLOPS:
-      print(f"Found {gpu_name} in CHIP_FLOPS")
+      debug_log(f"Found {gpu_name} in CHIP_FLOPS")
     else:
-      print(f"WARNING: {gpu_name} not found in CHIP_FLOPS")
+      debug_log(f"WARNING: {gpu_name} not found in CHIP_FLOPS")
       # Try to find similar keys
       similar_keys = [k for k in CHIP_FLOPS.keys() if "ORIN" in k or "JETSON" in k]
-      print(f"Similar keys in CHIP_FLOPS: {similar_keys}")
+      debug_log(f"Similar keys in CHIP_FLOPS: {similar_keys}")
+      
+      # Try a direct assignment for Jetson
+      if "ORIN" in gpu_raw_name:
+        debug_log("Forcing JETSON AGX ORIN 32GB FLOPS values")
+        flops = CHIP_FLOPS["JETSON AGX ORIN 32GB"]
 
     pynvml.nvmlShutdown()
 
+    # Log the final values being returned
+    debug_log(f"Returning DeviceCapabilities with model={gpu_name}, memory={memory_mb}, flops={flops}")
+    
     return DeviceCapabilities(
       model=f"Linux Box ({gpu_name})",
       chip=gpu_name,

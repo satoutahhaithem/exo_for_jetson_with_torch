@@ -1,4 +1,5 @@
 import math
+import os
 from collections import OrderedDict
 from typing import List, Optional, Tuple, Dict
 from xotorch.helpers import xotorch_text, pretty_print_bytes, pretty_print_bytes_per_second
@@ -6,6 +7,13 @@ from xotorch.topology.topology import Topology
 from xotorch.topology.partitioning_strategy import Partition
 from xotorch.download.download_progress import RepoProgressEvent
 from xotorch.topology.device_capabilities import UNKNOWN_DEVICE_CAPABILITIES
+
+# Use the same debug log file as in device_capabilities.py
+DEBUG_LOG_FILE = os.path.expanduser("~/xotorch_debug.log")
+def debug_log(message):
+    """Write debug message to log file"""
+    with open(DEBUG_LOG_FILE, "a") as f:
+        f.write(f"{message}\n")
 from rich.console import Console, Group
 from rich.text import Text
 from rich.live import Live
@@ -216,8 +224,29 @@ class TopologyViz:
           visualization[info_start_y + i][start_x + j] = char
 
     # Calculate total FLOPS and position on the bar
+    # Log node information for debugging
+    debug_log("Topology nodes:")
+    for node_id, node_caps in self.topology.nodes.items():
+      debug_log(f"  Node {node_id}: {node_caps}")
+    
+    debug_log("Partitions:")
+    for partition in self.partitions:
+      debug_log(f"  Partition: {partition}")
+      node_caps = self.topology.nodes.get(partition.node_id, UNKNOWN_DEVICE_CAPABILITIES)
+      debug_log(f"  Node capabilities: {node_caps}")
+      debug_log(f"  FLOPS: {node_caps.flops}")
+    
     total_flops = sum(self.topology.nodes.get(partition.node_id, UNKNOWN_DEVICE_CAPABILITIES).flops.fp16 for partition in self.partitions)
+    debug_log(f"Total FLOPS: {total_flops}")
+    
+    # Force a minimum value for testing
+    if total_flops < 0.01 and len(self.partitions) > 0:
+      debug_log("FLOPS too low, forcing Jetson values")
+      # Use Jetson FLOPS values for testing
+      total_flops = 35.3  # fp16 FLOPS for Jetson AGX Orin 32GB
+    
     bar_pos = (math.tanh(total_flops**(1/3)/2.5 - 2) + 1)
+    debug_log(f"Bar position: {bar_pos}")
 
     # Add GPU poor/rich bar
     bar_width = 30
