@@ -185,56 +185,90 @@ async def mac_device_capabilities() -> DeviceCapabilities:
 
 async def linux_device_capabilities() -> DeviceCapabilities:
   import psutil
+  import os
+  
+  # First, try to detect Jetson devices directly from system information
+  try:
+    # Check for Jetson-specific files
+    jetson_model = None
+    if os.path.exists('/proc/device-tree/model'):
+      with open('/proc/device-tree/model', 'r') as f:
+        model_info = f.read().strip().upper()
+        print(f"Device model from /proc/device-tree/model: {model_info}")
+        
+        if "JETSON" in model_info or "NVIDIA" in model_info:
+          if "ORIN" in model_info:
+            if "NANO" in model_info:
+              jetson_model = "JETSON ORIN NANO"
+            elif "NX" in model_info:
+              jetson_model = "JETSON ORIN NX"
+            else:
+              jetson_model = "JETSON AGX ORIN 32GB"
+    
+    if jetson_model:
+      print(f"Detected Jetson model from system info: {jetson_model}")
+      memory_mb = psutil.virtual_memory().total // 2**20
+      return DeviceCapabilities(
+        model=f"NVIDIA {jetson_model}",
+        chip=jetson_model,
+        memory=memory_mb,
+        flops=CHIP_FLOPS.get(jetson_model, DeviceFlops(fp32=0, fp16=0, int8=0)),
+      )
+  except Exception as e:
+    print(f"Error detecting Jetson from system info: {e}")
   
   # Check for CUDA using torch
   is_cuda = torch.cuda.is_available()
-  if DEBUG >= 2: print(f"torch.cuda.is_available(): {is_cuda}")
+  print(f"torch.cuda.is_available(): {is_cuda}")
   
   if is_cuda:
-    import pynvml
-
-    pynvml.nvmlInit()
-    handle = pynvml.nvmlDeviceGetHandleByIndex(0)
-    gpu_raw_name = pynvml.nvmlDeviceGetName(handle).upper()
-    
-    # For Jetson Orin devices, detect specific models
-    if "ORIN" in gpu_raw_name:
-      if "NANO" in gpu_raw_name:
-        gpu_name = "JETSON ORIN NANO"
-      elif "NX" in gpu_raw_name:
-        gpu_name = "JETSON ORIN NX"
-      else:
-        gpu_name = "JETSON AGX ORIN 32GB"
-    else:
-      gpu_name = gpu_raw_name.rsplit(" ", 1)[0] if gpu_raw_name.endswith("GB") else gpu_raw_name
-    
     try:
-      gpu_memory_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
-      memory_mb = gpu_memory_info.total // 2**20
-    except pynvml.NVMLError_NotSupported:
-      print("[Warning] pynvml: GPU memory info not supported on this device.")
-      memory_mb = psutil.virtual_memory().total // 2**20
+      import pynvml
 
-    if DEBUG >= 2: print(f"NVIDIA device {gpu_name=} {gpu_memory_info=}")
+      pynvml.nvmlInit()
+      handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+      gpu_raw_name = pynvml.nvmlDeviceGetName(handle).upper()
+      print(f"Raw GPU name from pynvml: {gpu_raw_name}")
+      
+      # For Jetson Orin devices, detect specific models
+      if "ORIN" in gpu_raw_name or "JETSON" in gpu_raw_name:
+        if "NANO" in gpu_raw_name:
+          gpu_name = "JETSON ORIN NANO"
+        elif "NX" in gpu_raw_name:
+          gpu_name = "JETSON ORIN NX"
+        else:
+          gpu_name = "JETSON AGX ORIN 32GB"
+      else:
+        gpu_name = gpu_raw_name.rsplit(" ", 1)[0] if gpu_raw_name.endswith("GB") else gpu_raw_name
+      
+      try:
+        gpu_memory_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+        memory_mb = gpu_memory_info.total // 2**20
+      except pynvml.NVMLError_NotSupported:
+        print("[Warning] pynvml: GPU memory info not supported on this device.")
+        memory_mb = psutil.virtual_memory().total // 2**20
 
-    pynvml.nvmlShutdown()
+      print(f"NVIDIA device {gpu_name=} {memory_mb=}MB")
 
-    return DeviceCapabilities(
-      model=f"Linux Box ({gpu_name})",
-      chip=gpu_name,
-      memory=memory_mb,
-      flops=CHIP_FLOPS.get(gpu_name, DeviceFlops(fp32=0, fp16=0, int8=0)),
-    )
+      pynvml.nvmlShutdown()
+
+      return DeviceCapabilities(
+        model=f"Linux Box ({gpu_name})",
+        chip=gpu_name,
+        memory=memory_mb,
+        flops=CHIP_FLOPS.get(gpu_name, DeviceFlops(fp32=0, fp16=0, int8=0)),
+      )
+    except Exception as e:
+      print(f"Error detecting NVIDIA GPU: {e}")
   # Check for AMD GPUs
   try:
     import pyamdgpuinfo
-    has_amd = True
     
     gpu_raw_info = pyamdgpuinfo.get_gpu(0)
     gpu_name = gpu_raw_info.name
     gpu_memory_info = gpu_raw_info.memory_info["vram_size"]
 
-    if DEBUG >= 2: print(f"AMD device {gpu_name=} {gpu_memory_info=}")
+    print(f"AMD device {gpu_name=} {gpu_memory_info=}")
 
     return DeviceCapabilities(
       model="Linux Box (" + gpu_name + ")",
@@ -243,9 +277,56 @@ async def linux_device_capabilities() -> DeviceCapabilities:
       flops=CHIP_FLOPS.get(gpu_name, DeviceFlops(fp32=0, fp16=0, int8=0)),
     )
   except (ImportError, Exception) as e:
-    if DEBUG >= 2: print(f"AMD GPU detection failed: {e}")
+    print(f"AMD GPU detection failed: {e}")
+  
+  # Try to detect Jetson using other methods as a last resort
+  try:
+    import subprocess
+    
+    # Try using nvidia-smi to get GPU info
+    result = subprocess.run(['nvidia-smi', '--query-gpu=name', '--format=csv,noheader'],
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    
+    if result.returncode == 0 and result.stdout:
+      gpu_name = result.stdout.strip().upper()
+      print(f"GPU name from nvidia-smi: {gpu_name}")
+      
+      if "JETSON" in gpu_name or "ORIN" in gpu_name or "TEGRA" in gpu_name:
+        if "NANO" in gpu_name:
+          jetson_model = "JETSON ORIN NANO"
+        elif "NX" in gpu_name:
+          jetson_model = "JETSON ORIN NX"
+        else:
+          jetson_model = "JETSON AGX ORIN 32GB"
+        
+        memory_mb = psutil.virtual_memory().total // 2**20
+        return DeviceCapabilities(
+          model=f"NVIDIA {jetson_model}",
+          chip=jetson_model,
+          memory=memory_mb,
+          flops=CHIP_FLOPS.get(jetson_model, DeviceFlops(fp32=0, fp16=0, int8=0)),
+        )
+  except Exception as e:
+    print(f"Error detecting Jetson using nvidia-smi: {e}")
+  
+  # As a last resort, check for specific Jetson files
+  try:
+    if os.path.exists('/etc/nv_tegra_release'):
+      print("Found /etc/nv_tegra_release - this is likely a Jetson device")
+      # Default to AGX Orin if we can't determine the specific model
+      jetson_model = "JETSON AGX ORIN 32GB"
+      memory_mb = psutil.virtual_memory().total // 2**20
+      return DeviceCapabilities(
+        model=f"NVIDIA {jetson_model}",
+        chip=jetson_model,
+        memory=memory_mb,
+        flops=CHIP_FLOPS.get(jetson_model, DeviceFlops(fp32=0, fp16=0, int8=0)),
+      )
+  except Exception as e:
+    print(f"Error checking for Jetson-specific files: {e}")
     
   # Fallback for CPU or unknown device
+  print("Falling back to CPU or Unknown Device")
   return DeviceCapabilities(
     model=f"Linux Box (CPU or Unknown Device)",
     chip=f"Unknown Chip",
