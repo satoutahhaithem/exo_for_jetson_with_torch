@@ -4,6 +4,7 @@ from xotorch import DEBUG
 import subprocess
 import psutil
 import asyncio
+import torch
 from xotorch.helpers import get_mac_system_info, subprocess_pool
 
 TFLOPS = 1.00
@@ -182,10 +183,12 @@ async def mac_device_capabilities() -> DeviceCapabilities:
 
 async def linux_device_capabilities() -> DeviceCapabilities:
   import psutil
-  from tinygrad import Device
-
-  if DEBUG >= 2: print(f"tinygrad {Device.DEFAULT=}")
-  if Device.DEFAULT == "CUDA" or Device.DEFAULT == "NV" or Device.DEFAULT == "GPU":
+  
+  # Check for CUDA using torch
+  is_cuda = torch.cuda.is_available()
+  if DEBUG >= 2: print(f"torch.cuda.is_available(): {is_cuda}")
+  
+  if is_cuda:
     import pynvml
 
     pynvml.nvmlInit()
@@ -215,9 +218,11 @@ async def linux_device_capabilities() -> DeviceCapabilities:
       memory=memory_mb,
       flops=CHIP_FLOPS.get(gpu_name, DeviceFlops(fp32=0, fp16=0, int8=0)),
     )
-  elif Device.DEFAULT == "AMD":
+  # Check for AMD GPUs
+  try:
     import pyamdgpuinfo
-
+    has_amd = True
+    
     gpu_raw_info = pyamdgpuinfo.get_gpu(0)
     gpu_name = gpu_raw_info.name
     gpu_memory_info = gpu_raw_info.memory_info["vram_size"]
@@ -230,14 +235,16 @@ async def linux_device_capabilities() -> DeviceCapabilities:
       memory=gpu_memory_info // 2**20,
       flops=CHIP_FLOPS.get(gpu_name, DeviceFlops(fp32=0, fp16=0, int8=0)),
     )
-
-  else:
-    return DeviceCapabilities(
-      model=f"Linux Box (Device: {Device.DEFAULT})",
-      chip=f"Unknown Chip (Device: {Device.DEFAULT})",
-      memory=psutil.virtual_memory().total // 2**20,
-      flops=DeviceFlops(fp32=0, fp16=0, int8=0),
-    )
+  except (ImportError, Exception) as e:
+    if DEBUG >= 2: print(f"AMD GPU detection failed: {e}")
+    
+  # Fallback for CPU or unknown device
+  return DeviceCapabilities(
+    model=f"Linux Box (CPU or Unknown Device)",
+    chip=f"Unknown Chip",
+    memory=psutil.virtual_memory().total // 2**20,
+    flops=DeviceFlops(fp32=0, fp16=0, int8=0),
+  )
 
 
 async def windows_device_capabilities() -> DeviceCapabilities:
