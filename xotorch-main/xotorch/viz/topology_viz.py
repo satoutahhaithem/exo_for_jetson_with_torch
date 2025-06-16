@@ -2,7 +2,7 @@ import math
 import os
 from collections import OrderedDict
 from typing import List, Optional, Tuple, Dict
-from xotorch.helpers import xotorch_text, pretty_print_bytes, pretty_print_bytes_per_second
+from xotorch.helpers import xotorch_text, pretty_print_bytes, pretty_print_bytes_per_second, DEBUG
 from xotorch.topology.topology import Topology
 from xotorch.topology.partitioning_strategy import Partition
 from xotorch.download.download_progress import RepoProgressEvent
